@@ -1,6 +1,3 @@
 Architecture:
   name: mobilenet
   width: 1
-  architectura: 'mobilenetv2'
-  pre_train_cifar: True
-  effnet_setup: CIFAR

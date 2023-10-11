@@ -1,9 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+# import torch.nn.functional as F
+
 from vector_quantize_pytorch import VectorQuantize
 # from Quantizer import VQVAE
-import ColabInferModel
+# import ColabInferModel
 
 
 class FirstUserFunctions(nn.Module):
@@ -16,7 +17,7 @@ class FirstUserFunctions(nn.Module):
         self.decay = decay
         self.eps = eps
         self.primary_loss = primary_loss
-        self.commitment_w = commitment
+        # self.commitment_w = commitment
         dummy_input = torch.zeros((1, 3, 100, 100))  # Check number of channels the encoder outputs
         self.quant_dim = encoder(dummy_input).shape[1]
         self.n_parts = n_parts
@@ -24,8 +25,9 @@ class FirstUserFunctions(nn.Module):
                                         codebook_size=self.n_embed,  # size of the dictionary
                                         decay=self.decay,  # the exponential moving average decay, lower means the
                                         # dictionary will change faster
-                                        commitment_weight=1.0)  # the weight on the commitment loss (==1 because we
-        # want control)
+                                        commitment_weight=commitment)  # the weight on the commitment loss (==1
+        # because we want control)
+        print("commitment", commitment)
         self.skip_quant = skip_quant
         self.learning_rate = learning_rate
 
@@ -41,14 +43,16 @@ class FirstUserFunctions(nn.Module):
             commit_loss = 0
             for z_e_part in z_e_split:
                 a, b, c, d = z_e_part.shape
-                z_q_part, indices_part, commit_loss_part = self.quantizer(z_e_part.reshape(z_e_part.shape[0], -1, z_e_part.shape[-1]))
-                # print(indices_part.shape)
+                # print(z_e_part.shape)
+                z_q_part, indices_part, commit_loss_part = self.quantizer(
+                    z_e_part.reshape(a, -1, d)
+                    # z_e_part
+                )
                 commit_loss += commit_loss_part
                 z_q_split.append(z_q_part.reshape(a, b, c, d))
-                indices_split.append(indices_part)
+                indices_split.append(indices_part.reshape(a, b, c))
             z_q = torch.cat(z_q_split, dim=3)
-            indices = torch.stack(indices_split, dim=2)
-            print(indices.shape)
+            indices = torch.stack(indices_split, dim=3)
         else:
             z_q, indices, commit_loss = z_e, None, 0
         return z_q, indices, commit_loss
@@ -66,9 +70,9 @@ class FirstUserFunctions(nn.Module):
         return loss / len(y_hat_list)
 
     def ensemble_calculator(self, preds_list):
-        return torch.mean(torch.stack(preds_list), axis=0 )
+        return torch.mean(torch.stack(preds_list), axis=0)
 
-    def accuracy(self,y,y_pred,ensemble_y_pred):
+    def accuracy(self, y, y_pred, ensemble_y_pred):
         ens_pred = torch.max(ensemble_y_pred.data, 1)[1]
         batch_ens_corr = (ens_pred == y).sum()
         predicted = []

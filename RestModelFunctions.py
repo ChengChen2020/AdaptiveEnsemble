@@ -18,13 +18,14 @@ class RestUsersFunctions(nn.Module):
         self.eps = eps
         self.primary_loss = primary_loss
         self.commitment_w = commitment
-        dummy_input = torch.zeros((1, 3, 100, 100)) # Check number of channels the encoder outputs
+        dummy_input = torch.zeros((1, 3, 100, 100)).cuda()  # Check number of channels the encoder outputs
         self.quant_dim = encoder(dummy_input).shape[1]
         self.quantizer = VectorQuantize(dim=self.quant_dim // self.n_parts,
                                         codebook_size=self.n_embed,  # size of the dictionary
-                                        decay=self.decay, # the exponential moving average decay, lower means the dictionary will change faster
+                                        decay=self.decay,  # the exponential moving average decay, lower means the
+                                        # dictionary will change faster
                                         commitment_weight=1.0,
-                                        )  # the weight on the commitment loss (==1 cause we want control))
+                                        )  # the weight on the commitment loss (==1 because we want control))
         self.skip_quant = skip_quant
         self.learning_rate = learning_rate
 
@@ -39,12 +40,13 @@ class RestUsersFunctions(nn.Module):
             z_q_split, indices_split = [], []
             commit_loss = 0
             for z_e_part in z_e_split:
-                z_q_part, indices_part, commit_loss_part = self.quantizer(z_e_part)
+                a, b, c, d = z_e_part.shape
+                z_q_part, indices_part, commit_loss_part = self.quantizer(z_e_part.reshape(z_e_part.shape[0], -1, z_e_part.shape[-1]))
                 commit_loss += commit_loss_part
-                z_q_split.append(z_q_part)
+                z_q_split.append(z_q_part.reshape(a, b, c, d))
                 indices_split.append(indices_part)
             z_q = torch.cat(z_q_split, dim=3)
-            indices = torch.stack(indices_split, dim=3)
+            indices = torch.stack(indices_split, dim=2)
         else:
             z_q, indices, commit_loss = z_e, None, 0
         return z_q, indices, commit_loss

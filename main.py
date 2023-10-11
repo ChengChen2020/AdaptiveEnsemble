@@ -1,6 +1,6 @@
-import os
+# import os
 import sys
-import ssl
+# import ssl
 import time
 import hydra
 import pickle
@@ -10,12 +10,19 @@ from omegaconf import DictConfig
 import torch
 import torch.nn as nn
 from torchvision import datasets
+from torch.utils.data import DataLoader
 from Archs.MobileNetV2 import SplitEffNet
 from torchvision.models import MobileNet_V2_Weights
 from ColabInferModel import NeuraQuantModel, NeuraQuantModel2
 from Utils.transforms import get_cifar_train_transforms, get_test_transform
 
 is_debug = sys.gettrace() is not None
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print('device:', device)
+
+skip_quant = False
+print('Skip quantization training?:', skip_quant)
 
 
 @hydra.main(version_base=None, config_path="Config_Files", config_name="config")
@@ -37,7 +44,7 @@ def train(cfg: DictConfig) -> None:
         training_params = cfg.Training.training_debug
     else:
         print('in run mode!')
-        training_params = cfg.Training.Training
+        training_params = cfg.Training.training
 
     # Prepare the Data ###
     test_transform = get_test_transform()
@@ -46,49 +53,41 @@ def train(cfg: DictConfig) -> None:
     else:
         train_transform = test_transform
 
-    if cfg.Dataset.Dataset['name'] == 'cifar10':
-        ssl._create_default_https_context = ssl._create_unverified_context
-        trainset = datasets.CIFAR10(root=cfg.params.data_path, train=True, download=True, transform=train_transform)
-        testset = datasets.CIFAR10(root=cfg.params.data_path, train=False, download=True, transform=test_transform)
+    trainset = datasets.CIFAR100(root=cfg.params.data_path, train=True, download=True, transform=train_transform)
+    testset = datasets.CIFAR100(root=cfg.params.data_path, train=False, download=True, transform=test_transform)
 
-    elif cfg.Dataset.Dataset['name'] == 'cifar100':
-        ssl._create_default_https_context = ssl._create_unverified_context
-        trainset = datasets.CIFAR100(root=cfg.params.data_path, train=True, download=True, transform=train_transform)
-        testset = datasets.CIFAR100(root=cfg.params.data_path, train=False, download=True, transform=test_transform)
+    trainloader = DataLoader(trainset, batch_size=training_params.batch_size,
+                             shuffle=True, num_workers=training_params.num_workers, drop_last=True)
+    testloader = DataLoader(testset, batch_size=training_params.batch_size,
+                            shuffle=False, num_workers=training_params.num_workers, drop_last=True)
 
-    # trainloader = torch.utils.data.DataLoader(trainset, batch_size=training_params.batch_size,
-    #                                           shuffle=True, num_workers=training_params.num_workers)
-    testloader = torch.utils.data.DataLoader(testset, batch_size=training_params.batch_size,
-                                             shuffle=False, num_workers=training_params.num_workers)
-    if cfg.Architecture.Architecture.name == 'mobilenet':
-        EncDec_dict = SplitEffNet(width=cfg.Architecture.Architecture.width, weights=MobileNet_V2_Weights.IMAGENET1K_V1,
-                                  num_classes=cfg.Dataset.Dataset.num_classes,
-                                  stop_layer=cfg.Quantization.Quantization.part_idx,
-                                  decoder_copies=cfg.Ensemble.Ensemble.n_ensemble,
-                                  architectura=cfg.Architecture.Architecture.architectura,
-                                  pre_train_cifar=cfg.Architecture.Architecture.pre_train_cifar)
+    EncDec_dict, _ = SplitEffNet(width=cfg.Architecture.Architecture.width,
+                              # weights=MobileNet_V2_Weights.IMAGENET1K_V1,
+                              num_classes=cfg.Dataset.Dataset.num_classes,
+                              decoder_copies=cfg.Ensemble.Ensemble.n_ensemble)
 
-    path_to_pretrained_dict = os.getcwd() + '/Saves/EncDec_dict_test.pkl'
-    if cfg.Training.Training.un_quantized_training:
-        with open('EncDec_dict_test.pkl', 'wb') as f:
-            pickle.dump(EncDec_dict, f)
+    for x, y in testloader:
+        print(x.shape, y.shape)
+        break
 
-    if not cfg.Training.Training.un_quantized_training:
-        with open(path_to_pretrained_dict, 'rb') as f:
-            EncDec_dict = pickle.load(f)
+    # path_to_pretrained_dict = './EncDec_dict_quantize.pkl'
+    # if skip_quant:
+    #     with open(path_to_pretrained_dict, 'rb') as f:
+    #         EncDec_dict = pickle.load(f)
+    #         EncDec_dict['encoder'].eval()
 
-    learning_rate = cfg.Training.Training.lr
+    learning_rate = training_params.lr
     criterion = nn.CrossEntropyLoss()
     dec = EncDec_dict['decoders'][0]
 
     model = NeuraQuantModel(encoder=EncDec_dict['encoder'],
                             decoder=[dec],
                             primary_loss=criterion,
-                            n_embed=cfg.Quantization.Quantization.n_embed,
-                            n_parts=cfg.Quantization.Quantization.n_parts,
-                            commitment=cfg.Quantization.Quantization.commitment_w)
+                            n_embed=1024,
+                            n_parts=2,
+                            commitment=0.1).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
 
     start_time = time.time()
@@ -96,9 +95,9 @@ def train(cfg: DictConfig) -> None:
     test_losses = []
     epoch_acc = []
 
-    num_users = cfg.Ensemble.Ensemble.n_ensemble
-    num_classes = cfg.Dataset.Dataset.num_classes
-    epochs = 1  # set number of epochs
+    num_users = 16
+    num_classes = 100
+    epochs = 100  # set number of epochs
 
     entries = len(testset) // training_params.batch_size
     train_first_acc_matrix = torch.empty([epochs, 1])
@@ -113,44 +112,30 @@ def train(cfg: DictConfig) -> None:
         return pp
 
     print(f'\nNumber of Parameters: {get_n_params(model)}\n')
-    subset = 34000
-    start_idx = 34000
-    stop_idx = 35000
+    shared_idx = 34000
+    shared_indices = np.arange(0, shared_idx)
+    dataloaders = []
+    for i in range(16):
+        part_indices = np.arange(shared_idx + i * 1000, shared_idx + i * 1000 + 1000)
+        part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
+        dataloaders.append(DataLoader(part_set, batch_size=training_params.batch_size,
+                                      shuffle=True, num_workers=training_params.num_workers, drop_last=True))
 
-    # if cfg.Ensemble.Ensemble.n_ensemble > 1:
-    #     numbers = np.arange(0, subset)
-    #     rand_ints = list(np.sort(np.unique(np.random.choice(numbers, dense))))
-    #     smallset = torch.utils.data.Subset(trainset, rand_ints)
-    #     trainloader_first = torch.utils.data.DataLoader(smallset, batch_size=training_params.batch_size,
-    #                                               shuffle=True, num_workers=training_params.num_workers)
-
-    shared_idxs = np.arange(0, subset)
-    first = np.arange(start_idx, stop_idx)
-    start_idx = stop_idx
-    stop_idx = stop_idx + 1000
-    first_model_indices = np.concatenate((shared_idxs, first))
-    smallset = torch.utils.data.Subset(trainset, first_model_indices)
-    trainloader_first = torch.utils.data.DataLoader(smallset, batch_size=training_params.batch_size,
-                                                    shuffle=True, num_workers=training_params.num_workers)
-
-    assert len(trainloader_first.dataset) == 35000
+    assert len(dataloaders[0]) == 546
 
     #####################
     # Train First Model #
     #####################
 
-    if cfg.Training.Training.train_first:
-
+    if training_params.train_first:
+        part_loader = dataloaders[0]
         for epc in range(epochs):
             bingos = 0
             losses = 0
-            for batch_num, (images, labels) in enumerate(trainloader_first):
+            for batch_num, (images, labels) in enumerate(part_loader):
+                images, labels = images.to(device), labels.to(device)
                 # print(images.shape, labels.shape)
-                batch_num += 1
-                if len(images) != training_params.batch_size:
-                    continue
-                batch = (images, labels)
-                result_dict, batch_acc, y_hat = model.process_batch(batch)
+                result_dict, batch_acc, y_hat = model.process_batch(images, labels)
                 loss = result_dict['loss']
                 losses += loss.item()
                 bingos += batch_acc[0]
@@ -162,16 +147,15 @@ def train(cfg: DictConfig) -> None:
 
                 if batch_num % 32 == 0:
                     print(
-                        f'epoch: {epc:2}  batch: {batch_num:2} [{training_params.batch_size * batch_num:6}/{len(smallset)}]  total loss: {loss.item():10.8f}  \
+                        f'epoch: {epc:2}  batch: {batch_num:2} [{training_params.batch_size * batch_num:6}/{len(part_loader.dataset)}]  total loss: {loss.item():10.8f}  \
                     time = [{(time.time() - start_time) / 60}] minutes')
 
             scheduler.step()
             # Accuracy #
-            loss = losses / batch_num
+            loss = losses / len(part_loader)
             # writer.add_scalar("Train Loss (Model1)", loss, epc)
             train_losses.append(loss)
-            train_losses.append(loss)
-            accuracy = 100 * bingos.item() / len(smallset)
+            accuracy = 100 * bingos.item() / len(part_loader.dataset)
             epoch_acc.append(accuracy)
             # writer.add_scalar("Train Accuracy (Model1)", accuracy, epc)
             train_first_acc_matrix[epc][0] = epoch_acc[epc]
@@ -182,12 +166,8 @@ def train(cfg: DictConfig) -> None:
 
             with torch.no_grad():
                 for b, (X_test, y_test) in enumerate(testloader):
-                    if len(X_test) != training_params.batch_size:
-                        continue
-                    # Apply the model
-                    b += 1
-                    batch = (X_test, y_test)
-                    result_dict, test_batch_acc, y_hat = model.process_batch(batch)
+                    X_test, y_test = X_test.to(device), y_test.to(device)
+                    result_dict, test_batch_acc, y_hat = model.process_batch(X_test, y_test)
                     test_loss = result_dict['loss']
                     test_losses_val += test_loss.item()
                     num_val_correct += test_batch_acc[0]
@@ -198,12 +178,21 @@ def train(cfg: DictConfig) -> None:
                 test_first_acc_matrix[epc][0] = 100 * num_val_correct / len(testset)
                 # writer.add_scalar("Test Accuracy (Model1)", num_val_correct / 100, epc)
 
-            print(f'Train (Model1) Accuracy at epoch {epc + 1} is {100 * bingos.item() / len(smallset)}%')
+            print(f'Train (Model1) Accuracy at epoch {epc + 1} is {100 * bingos.item() / len(part_loader.dataset)}%')
             print(f'Validation (Model1) Accuracy at epoch {epc + 1} is {100 * num_val_correct / len(testset)}%')
             model.train()
 
         # torch.save(model.encoder.state_dict(), 'NeuraQuantizerEncoder.pt')
         # torch.save(model.quantizer.state_dict(), 'NeuraQuantizerQuantizer.pt')
+
+    EncDec_dict['encoder'].eval()
+    EncDec_dict['quantizer'] = model.quantizer
+    EncDec_dict['quantizer'].eval()
+
+    for param in EncDec_dict['encoder'].parameters():
+        param.requires_grad = False
+    for param in EncDec_dict['quantizer'].parameters():
+        param.requires_grad = False
 
     #####################
     # Train Next Models #
@@ -213,19 +202,21 @@ def train(cfg: DictConfig) -> None:
     test_rest_acc_matrix = torch.empty([epochs, num_users - 1])
     # y_hat_tensor_rest = torch.empty([num_users-1, epochs, entries, training_params.batch_size, num_classes])
 
+    print(len(EncDec_dict['decoders']))
+
     for num in range(1, len(EncDec_dict['decoders'])):
         # strings for tensorboard
         model_name = 'Model' + str(num + 1)
 
         dec = EncDec_dict['decoders'][num]
-        criterion2 = nn.CrossEntropyLoss()
         # Fix encoder and quantizer
-        model2 = NeuraQuantModel2(encoder=model.encoder.train(False),
+        model2 = NeuraQuantModel2(encoder=EncDec_dict['encoder'],
                                   decoder=[dec],
-                                  quantizer=model.quantizer.train(False),
-                                  primary_loss=criterion2,
+                                  quantizer=EncDec_dict['decoder'],
+                                  primary_loss=nn.CrossEntropyLoss(),
                                   n_embed=cfg.Quantization.Quantization.n_embed,
-                                  commitment=cfg.Quantization.Quantization.commitment_w)
+                                  n_parts=cfg.Quantization.Quantization.n_parts,
+                                  commitment=cfg.Quantization.Quantization.commitment_w).to(device)
 
         model2.encoder.eval()
         for param in model2.encoder.parameters():
@@ -233,24 +224,17 @@ def train(cfg: DictConfig) -> None:
 
         optimizer2 = torch.optim.Adam(model2.parameters(), lr=learning_rate)
         scheduler2 = torch.optim.lr_scheduler.StepLR(optimizer2, step_size=3, gamma=0.9)
-        next = np.arange(start_idx, stop_idx)
-        start_idx = stop_idx
-        stop_idx = stop_idx + 1000
-        next_model_indices = np.concatenate((shared_idxs, next))
-        smallset1 = torch.utils.data.Subset(trainset, next_model_indices)
-        trainloader_next = torch.utils.data.DataLoader(smallset1, batch_size=training_params.batch_size,
-                                                       shuffle=True, num_workers=training_params.num_workers)
 
         for epc in range(epochs):
             bingos = 0
             losses = 0
 
-            for batch_num, (Train, Labels) in enumerate(trainloader_next):
-                if len(Train) != training_params.batch_size:
-                    continue
-                batch_num += 1
-                batch = (Train, Labels)
-                result_dict, batch_acc, y_hat = model2.process_batch_fixed(batch)
+            part_loader = dataloaders[num]
+
+            for batch_num, (images, labels) in enumerate(part_loader):
+                images, labels = images.to(device), labels.to(device)
+                print(labels.shape)
+                result_dict, batch_acc, y_hat = model2.process_batch_fixed(images, labels)
                 loss = result_dict['loss']
                 losses += loss.item()
                 bingos += batch_acc[0]
@@ -262,15 +246,15 @@ def train(cfg: DictConfig) -> None:
 
                 if batch_num % 32 == 0:
                     print(
-                        f'epoch: {epc:2}  batch: {batch_num:2} [{training_params.batch_size * batch_num:6}/{len(smallset1)}]  total loss: {loss.item():10.8f}  \
+                        f'epoch: {epc:2}  batch: {batch_num:2} [{training_params.batch_size * batch_num:6}/{len(part_loader.dataset)}]  total loss: {loss.item():10.8f}  \
                     time = [{(time.time() - start_time) / 60}] minutes')
 
             scheduler2.step()
             # Accuracy #
-            tot_loss = losses / batch_num
+            tot_loss = losses / len(part_loader)
             train_losses.append(tot_loss)
             # writer.add_scalar(train_loss_str, tot_loss, epc)
-            accuracy = 100 * bingos.item() / len(smallset1)
+            accuracy = 100 * bingos.item() / len(part_loader.dataset)
             # writer.add_scalar(train_acc_str, accuracy, epc)
             epoch_acc.append(accuracy)
             train_rest_acc_matrix[epc][num - 1] = epoch_acc[epc]
@@ -281,12 +265,8 @@ def train(cfg: DictConfig) -> None:
 
             with torch.no_grad():
                 for b, (X_test, y_test) in enumerate(testloader):
-                    if len(X_test) != training_params.batch_size:
-                        continue
-                    # Apply the model
-                    b += 1
-                    batch = (X_test, y_test)
-                    result_dict, test_batch_acc, y_hat = model2.process_batch_fixed(batch)
+                    X_test, y_test = X_test.to(device), y_test.to(device)
+                    result_dict, test_batch_acc, y_hat = model2.process_batch_fixed(X_test, y_test)
                     test_loss = result_dict['loss']
                     test_losses_val += test_loss.item()
                     num_val_correct += test_batch_acc[0]
@@ -297,7 +277,7 @@ def train(cfg: DictConfig) -> None:
                 test_rest_acc_matrix[epc][num - 1] = 100 * num_val_correct / len(testset)
                 # writer.add_scalar(test_acc_str, num_val_correct / 100, epc)
 
-            print(f'Train {model_name} Accuracy at epoch {epc + 1} is {100 * bingos / len(smallset1)}%')
+            print(f'Train {model_name} Accuracy at epoch {epc + 1} is {100 * bingos / len(part_loader.dataset)}%')
             print(f'Validation {model_name} Accuracy at epoch {epc + 1} is {100 * num_val_correct / len(testset)}%')
             model2.decoder.train()
 
@@ -308,6 +288,10 @@ def train(cfg: DictConfig) -> None:
     # Save pretrained model with no quantization
     if cfg.Training.Training.un_quantized_training:
         with open('EncDec_dict.pkl', 'wb') as f:
+            pickle.dump(EncDec_dict, f)
+
+    if not cfg.Training.Training.un_quantized_training:
+        with open('EncDec_dict_quantize.pkl', 'wb') as f:
             pickle.dump(EncDec_dict, f)
 
     def ensemble_calculator(preds_list, num_users):
@@ -353,6 +337,7 @@ def train(cfg: DictConfig) -> None:
                 accuracy_ensemble_tensor[num_of_ens, epc] = acc_correct
 
     # save losses to file
+    torch.save(model, 'model.pt')
     torch.save(accuracy_ensemble_tensor, 'accuracy_ensemble_tensor.pt')
     torch.save(test_rest_acc_matrix, 'test_rest_acc_matrix.pt')
     torch.save(train_rest_acc_matrix, 'train_rest_acc_matrix.pt')

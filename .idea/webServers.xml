@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="152e1f83-d6b0-44b6-a569-378c843de936" name="gilbreth">
+        <fileTransfer rootFolder="/scratch/gilbreth/chen4384" accessType="SFTP" host="gilbreth.rcac.purdue.edu" port="22" sshConfigId="64c0aee7-1d8f-4d5a-a993-f88c31896721" sshConfig="chen4384@gilbreth.rcac.purdue.edu:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
