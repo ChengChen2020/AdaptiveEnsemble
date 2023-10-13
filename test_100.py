@@ -10,6 +10,7 @@ import torchvision
 import torchvision.transforms as transforms
 
 # import os
+import time
 import argparse
 # import numpy as np
 
@@ -95,6 +96,8 @@ def ensemble_test(n_parts=2):
         net.eval()
 
         print(num_of_ens)
+
+        start_time = time.time()
         with torch.no_grad():
             for b, (X_test, y_test) in enumerate(testloader):
                 X_test, y_test = X_test.to(device), y_test.to(device)
@@ -103,7 +106,8 @@ def ensemble_test(n_parts=2):
 
                 y_hat_tensor[num_of_ens, b, :, :], _ = net(X_test)
 
-                y_pred_tensor[num_of_ens, b, :] = net(X_test)[0].max(1)[1]
+                # y_pred_tensor[num_of_ens, b, :] = net(X_test)[0].max(1)[1]
+        print(time.time() - start_time)
 
     # for b, (X_test, y_test) in enumerate(testloader):
     #     for num_of_ens in range(num_users):
