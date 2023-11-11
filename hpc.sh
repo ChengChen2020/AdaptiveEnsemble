@@ -13,11 +13,26 @@
 source ~/.bashrc
 cd /scratch/gilbreth/"$USER"/AdaptiveEnsemble || exit
 conda activate d2l
-#python train_100.py --id -1 --ep 100 --n_parts 2
-for i in {0..15}
-do
-  echo "$i"
-  python train_100.py --id "$i" --resume --ep 100 --n_parts 2
-done
-#python train_100.py --id 0 --resume --ep 100
-python test_100.py --n_parts 2
+PP=5
+#QB=-1
+#python train_scalar.py --id -1 --pp $PP --ep 100 --qbit $QB
+#for i in {0..15}
+#do
+#  echo "$i"
+#  python train_scalar.py --id "$i" --pp $PP --resume --ep 100 --qbit $QB
+#done
+##python train_100.py --id 0 --resume --ep 100
+#python test_scalar.py --pp $PP --qbit $QB
+
+python train_100.py --id -1 --skip_quant
+
+#NP=1
+#EB=2048
+#python train_100.py --id -1 --pp $PP --ep 100 --n_parts $NP --n_embed $EB
+#for i in {0..15}
+#do
+#  echo "$i"
+#  python train_scalar.py --id "$i" --pp $PP --resume --ep 100 --n_parts $NP --n_embed $EB
+#done
+##python train_100.py --id 0 --resume --ep 100
+#python test_scalar.py --pp $PP --n_parts $NP --n_embed $EB

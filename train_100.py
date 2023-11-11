@@ -95,7 +95,7 @@ def test(ep):
         print('Saving..')
         state = {
             'encoder': net.encoder.state_dict(),
-            'quantizer': net.quantizer.state_dict(),
+            # 'quantizer': net.quantizer.state_dict(),
             'decoder': net.decoder.state_dict(),
             'acc': acc,
             'epoch': ep,
@@ -144,17 +144,26 @@ if __name__ == '__main__':
         testset, batch_size=64, shuffle=False, num_workers=1)
 
     if args.id == -1:
-        shared_idx = 34000
+        shared_idx = 50000
         shared_indices = np.arange(0, shared_idx)
         shared_set = torch.utils.data.Subset(trainset, shared_indices)
         trainloader = torch.utils.data.DataLoader(
             shared_set, batch_size=64, shuffle=True, num_workers=1)
     else:
-        shared_idx = 34000
+        # shared_idx = 34000
+        # shared_indices = np.arange(0, shared_idx)
+        # dataloaders = []
+        # for i in range(args.nu):
+        #     part_indices = np.arange(shared_idx + i * 1000, shared_idx + i * 1000 + 1000)
+        #     part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
+        #     dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
+        #                                                    shuffle=True, num_workers=1, drop_last=False))
+
+        shared_idx = 40000
         shared_indices = np.arange(0, shared_idx)
         dataloaders = []
         for i in range(args.nu):
-            part_indices = np.arange(shared_idx + i * 1000, shared_idx + i * 1000 + 1000)
+            part_indices = np.arange(shared_idx + i * 2000, shared_idx + i * 2000 + 2000)
             part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
             dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
                                                            shuffle=True, num_workers=1, drop_last=False))
@@ -180,7 +189,7 @@ if __name__ == '__main__':
         # Load checkpoint.
         print('==> Resuming from checkpoint..')
         assert os.path.isdir('checkpoint'), 'Error: no checkpoint directory found!'
-        checkpoint = torch.load(f'./checkpoint/0.0001_5_100_16_-1_4096_{args.n_parts}_1.0_False_AdaptE_ckpt.pth')
+        checkpoint = torch.load(f'./checkpoint/0.0001_{args.pp}_100_16_-1_{args.n_embed}_{args.n_parts}_1.0_False_AdaptE_ckpt.pth')
 
         net.encoder.load_state_dict(checkpoint['encoder'])
         for param in net.encoder.parameters():

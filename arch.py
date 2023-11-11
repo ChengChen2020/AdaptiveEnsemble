@@ -93,6 +93,8 @@ def EnsembleNet(res_stop=5, ncls=10, skip_quant=True, n_embed=4096, n_parts=1, c
     decoder_layers.append(nn.Flatten())
     decoder_layers.append(classifier)
 
+    print(len(encoder_layers), len(decoder_layers))
+
     EncDec_dict = dict(encoder=nn.Sequential(*encoder_layers), decoder=nn.Sequential(*decoder_layers))
 
     net = MobileNet100(EncDec_dict, skip_quant=skip_quant, n_embed=n_embed, n_parts=n_parts, commitment=commitment)
@@ -102,20 +104,37 @@ def EnsembleNet(res_stop=5, ncls=10, skip_quant=True, n_embed=4096, n_parts=1, c
 
 
 if __name__ == "__main__":
-    vq = VectorQuantize(
-        dim=256,
-        codebook_size=512,  # codebook size
-        decay=0.8,  # the exponential moving average decay, lower means the dictionary will change faster
-        commitment_weight=1.  # the weight on the commitment loss
-    )
+    # vq = VectorQuantize(
+    #     dim=256,
+    #     codebook_size=512,  # codebook size
+    #     decay=0.8,  # the exponential moving average decay, lower means the dictionary will change faster
+    #     commitment_weight=1.  # the weight on the commitment loss
+    # )
+    #
+    # x = torch.randn(1, 32, 32, 256)
+    # quantized, indices, commit_loss = vq(x)  # (1, 1024, 256), (1, 1024), (1)
+    #
+    # print(quantized.shape, indices.shape)
+    #
+    # print(get_num_params(vq))
 
-    x = torch.randn(1, 32, 32, 256)
-    quantized, indices, commit_loss = vq(x)  # (1, 1024, 256), (1, 1024), (1)
+    net = EnsembleNet(res_stop=10).cuda()
+    net.eval()
+    X = torch.rand(size=(2, 3, 32, 32)).cuda()
+    # a = net.encoder(X)
+    # print(a.shape)
 
-    print(quantized.shape, indices.shape)
-
-    print(get_num_params(vq))
-
-    net = EnsembleNet()
-    X = torch.rand(size=(2, 3, 32, 32))
-    net(X)
+    import torch.profiler as profiler
+    with profiler.profile(
+            activities=[
+                profiler.ProfilerActivity.CPU,
+                profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
+            record_shapes=True
+    ) as p:
+        with profiler.record_function("model_inference"):
+            a = net.encoder(X)
+    print(a.shape)
+    print(p.key_averages().table(
+        sort_by="self_cuda_time_total", row_limit=-1))
