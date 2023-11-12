@@ -86,15 +86,17 @@ def ensemble_test(pp=5, n_parts=2):
 
     for num_of_ens in range(num_users):
 
-        checkpoint = torch.load(f'./checkpoint/0.0001_{pp}_100_16_{num_of_ens}_4096_{n_parts}_1.0_False_AdaptE_ckpt.pth')
+        checkpoint = torch.load(f'./checkpoint_1_8/0.0001_{pp}_100_16_{num_of_ens}_4096_{n_parts}_1.0_False_AdaptE_ckpt.pth')
         # checkpoint = torch.load('./checkpoint/ckpt_74.49.pth')
-        checkpoint_2 = torch.load(f'./checkpoint/0.0001_{pp}_100_16_-1_4096_{n_parts}_1.0_False_AdaptE_ckpt.pth')
+        checkpoint_2 = torch.load(f'./checkpoint_1_8/0.0001_{pp}_100_16_-1_4096_{n_parts}_1.0_False_AdaptE_ckpt.pth')
         print(checkpoint['acc'])
         net.encoder.load_state_dict(checkpoint_2['encoder'])
         net.quantizer.load_state_dict(checkpoint_2['quantizer'])
         net.decoder.load_state_dict(checkpoint['decoder'])
         # best_acc = checkpoint['acc']
         # start_epoch = checkpoint['epoch']
+
+        print("????", test(net))
 
         net.eval()
 
@@ -154,5 +156,6 @@ if __name__ == "__main__":
     # net.decoder.load_state_dict(checkpoint_2['decoder'])
     # best_acc = checkpoint['acc']
     # start_epoch = checkpoint['epoch']
+    torch.manual_seed(0)
 
     ensemble_test(pp=args.pp, n_parts=args.n_parts)

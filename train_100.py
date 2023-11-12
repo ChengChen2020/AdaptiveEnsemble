@@ -150,23 +150,24 @@ if __name__ == '__main__':
         trainloader = torch.utils.data.DataLoader(
             shared_set, batch_size=64, shuffle=True, num_workers=1)
     else:
-        # shared_idx = 34000
-        # shared_indices = np.arange(0, shared_idx)
-        # dataloaders = []
-        # for i in range(args.nu):
-        #     part_indices = np.arange(shared_idx + i * 1000, shared_idx + i * 1000 + 1000)
-        #     part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
-        #     dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
-        #                                                    shuffle=True, num_workers=1, drop_last=False))
-
-        shared_idx = 40000
-        shared_indices = np.arange(0, shared_idx)
-        dataloaders = []
-        for i in range(args.nu):
-            part_indices = np.arange(shared_idx + i * 2000, shared_idx + i * 2000 + 2000)
-            part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
-            dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
-                                                           shuffle=True, num_workers=1, drop_last=False))
+        if args.nu == 16:
+            shared_idx = 34000
+            shared_indices = np.arange(0, shared_idx)
+            dataloaders = []
+            for i in range(args.nu):
+                part_indices = np.arange(shared_idx + i * 1000, shared_idx + i * 1000 + 1000)
+                part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
+                dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
+                                                               shuffle=True, num_workers=1, drop_last=False))
+        elif args.nu == 5:
+            shared_idx = 40000
+            shared_indices = np.arange(0, shared_idx)
+            dataloaders = []
+            for i in range(args.nu):
+                part_indices = np.arange(shared_idx + i * 2000, shared_idx + i * 2000 + 2000)
+                part_set = torch.utils.data.Subset(trainset, np.concatenate((shared_indices, part_indices)))
+                dataloaders.append(torch.utils.data.DataLoader(part_set, batch_size=64,
+                                                               shuffle=True, num_workers=1, drop_last=False))
 
         trainloader = dataloaders[args.id]
 
